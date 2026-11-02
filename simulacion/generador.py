@@ -25,6 +25,17 @@ class GeneradorCongruencial:
         factor = 10 ** self.decimales
         return (self.x * factor // self.m) / factor
 
+
+
+
+
+
+
+
+
+
+
+#----------------------------------------------------------------------------------------------------------
     def secuencia(self, cantidad):
         """Lista de (i, X, Rnd) desde la semilla, para mostrar en la pestaña Generador."""
         copia = GeneradorCongruencial(self.semilla, self.a, self.c, self.m, self.decimales)

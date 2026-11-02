@@ -3,7 +3,7 @@
 from PySide6.QtCore import QAbstractTableModel, QModelIndex, Qt
 from PySide6.QtGui import QColor, QFont
 from PySide6.QtWidgets import (QAbstractItemView, QDoubleSpinBox, QFileDialog, QFormLayout,
-                               QGroupBox, QHBoxLayout, QHeaderView, QLabel, QMainWindow,
+                               QGroupBox, QHBoxLayout, QHeaderView, QLabel, QMainWindow, QMenu,
                                QMessageBox, QPushButton, QScrollArea, QSpinBox, QSplitter,
                                QTableView, QTableWidget, QTableWidgetItem, QTabWidget,
                                QVBoxLayout, QWidget)
@@ -95,11 +95,19 @@ class ModeloVector(QAbstractTableModel):
     def __init__(self):
         super().__init__()
         self.filas = []
+        self.columna_marcada = None   # inicio elegido para congelar: se marca con ▶ en el encabezado
 
     def cargar(self, filas):
         self.beginResetModel()
         self.filas = filas
         self.endResetModel()
+
+    def marcar_columna(self, columna):
+        anterior = self.columna_marcada
+        self.columna_marcada = columna
+        for c in (anterior, columna):
+            if c is not None:
+                self.headerDataChanged.emit(Qt.Horizontal, c, c)
 
     def rowCount(self, parent=QModelIndex()):
         return len(self.filas)
@@ -126,9 +134,11 @@ class ModeloVector(QAbstractTableModel):
         if orientacion != Qt.Horizontal:
             return None
         if role == Qt.DisplayRole:
-            return TITULOS[seccion]
+            return ("▶ " if seccion == self.columna_marcada else "") + TITULOS[seccion]
         if role == Qt.BackgroundRole:
             return QColor(COLOR_GRUPO[GRUPOS[seccion]])
+        if role == Qt.ToolTipRole:
+            return "Clic derecho para elegir desde y hasta qué columna congelar"
         return None
 
 
@@ -136,7 +146,7 @@ class ModeloVector(QAbstractTableModel):
 # Panel que dibuja la fila seleccionada: los 3 depositos y quien esta en cada uno
 # ---------------------------------------------------------------------------
 
-class PanelFila(QWidget):
+class PanelFila(QWidget): #muestra la fila seleccionada del vector de estado (3 depositos + supervisor)
     def __init__(self):
         super().__init__()
         self.titulo = QLabel("Seleccioná una fila del vector para ver el estado del sistema.")
@@ -158,7 +168,8 @@ class PanelFila(QWidget):
         layout.addLayout(fila_cajas)
         layout.addWidget(self.supervisor)
 
-    def mostrar(self, f):
+    def mostrar(self, f): # muestra la fila f del vector de estado en el panel
+
         self.titulo.setText(f"Fila {f['fila']}  ·  Reloj {formatear(f['reloj'])} min "
                             f"({f['dia_hora']})  ·  Evento: {f['evento']}")
 
@@ -194,6 +205,16 @@ class PanelFila(QWidget):
 # Ventana principal
 # ---------------------------------------------------------------------------
 
+class SpinBoxSinRueda(QSpinBox):
+    def wheelEvent(self, evento): # Ignora la rueda: no cambia el valor y el panel sigue scrolleando
+        evento.ignore()
+
+
+class DoubleSpinBoxSinRueda(QDoubleSpinBox):
+    def wheelEvent(self, evento): # Ignora la rueda: no cambia el valor y el panel sigue scrolleando
+        evento.ignore()
+
+
 class VentanaPrincipal(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -215,9 +236,11 @@ class VentanaPrincipal(QMainWindow):
 
         boton_simular = QPushButton("▶ Simular")
         boton_simular.setStyleSheet("font-size: 15px; padding: 8px; font-weight: bold;")
-        boton_simular.clicked.connect(self.simular)
+        boton_simular.clicked.connect(self.simular) # Cuando se hace click en el boton "Simular" ejecuta la funcion simular() que hace la simulacion y muestra los resultados
+        
         boton_defecto = QPushButton("Valores por defecto")
         boton_defecto.clicked.connect(self.valores_por_defecto)
+       
         boton_excel = QPushButton("Exportar vector a Excel")
         boton_excel.clicked.connect(self.exportar)
         for boton in (boton_simular, boton_defecto, boton_excel):
@@ -232,16 +255,43 @@ class VentanaPrincipal(QMainWindow):
         # --- Pestaña 1: vector de estado + panel de la fila ---
         self.modelo = ModeloVector()
         self.tabla = QTableView()
-        self.tabla.setModel(self.modelo)
-        self.tabla.setSelectionBehavior(QAbstractItemView.SelectRows)   # selecciona la linea completa
-        self.tabla.setSelectionMode(QAbstractItemView.SingleSelection)
-        self.tabla.verticalHeader().setVisible(False)
-        self.tabla.horizontalHeader().setSectionResizeMode(QHeaderView.Interactive)
+        self.tabla_fija = QTableView()   # columnas congeladas: a la izquierda, sin scroll horizontal propio
+        self.rango_congelado = None      # (primera, ultima) columna congelada; None = ninguna
+        self.inicio_congelado = None     # columna elegida con "Congelar desde acá", esperando el final
+        for tabla in (self.tabla_fija, self.tabla):
+            tabla.setModel(self.modelo)
+            tabla.setSelectionBehavior(QAbstractItemView.SelectRows)   # selecciona la linea completa
+            tabla.setSelectionMode(QAbstractItemView.SingleSelection)
+            tabla.verticalHeader().setVisible(False)
+            encabezado = tabla.horizontalHeader()
+            encabezado.setSectionResizeMode(QHeaderView.Interactive)
+            encabezado.setContextMenuPolicy(Qt.CustomContextMenu)
+            encabezado.customContextMenuRequested.connect(lambda pos, e=encabezado: self.menu_congelar(e, pos))
+        self.tabla_fija.setSelectionModel(self.tabla.selectionModel())  # la fila seleccionada es la misma en las dos
         self.tabla.selectionModel().selectionChanged.connect(self.fila_seleccionada)
+        self.tabla_fija.horizontalHeader().sectionResized.connect(self.ajustar_tabla_fija)
+
+        # Las dos tablas tienen barra horizontal siempre visible: asi miden lo mismo de alto y las filas quedan alineadas
+        self.tabla_fija.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.tabla_fija.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOn)
+        vertical_fija = self.tabla_fija.verticalScrollBar()
+        vertical = self.tabla.verticalScrollBar()
+        vertical.valueChanged.connect(vertical_fija.setValue)
+        vertical_fija.valueChanged.connect(self.scroll_desde_tabla_fija)
+        vertical_fija.rangeChanged.connect(lambda: vertical_fija.setValue(vertical.value()))
+
+        self.tablas = QSplitter(Qt.Horizontal)
+        self.tablas.addWidget(self.tabla_fija)
+        self.tablas.addWidget(self.tabla)
+        self.tablas.setStretchFactor(0, 0)
+        self.tablas.setStretchFactor(1, 1)
+        self.tablas.setChildrenCollapsible(False)
+        self.tabla.setMinimumWidth(200)
+        self.tabla_fija.hide()
 
         self.panel_fila = PanelFila()
         division = QSplitter(Qt.Vertical)
-        division.addWidget(self.tabla)
+        division.addWidget(self.tablas)
         division.addWidget(self.panel_fila)
         division.setSizes([550, 250])
 
@@ -279,13 +329,13 @@ class VentanaPrincipal(QMainWindow):
         """SpinBox entero o decimal segun el parametro."""
         valor = getattr(Parametros(), atributo)
         if atributo in ("inicio_t", "inicio_i", "inicio_s"):
-            campo = QSpinBox()
+            campo = SpinBoxSinRueda()
             campo.setRange(1, 3)
         elif atributo in ENTEROS:
-            campo = QSpinBox()
+            campo = SpinBoxSinRueda()
             campo.setRange(0, 10 ** 9)
         else:
-            campo = QDoubleSpinBox()
+            campo = DoubleSpinBoxSinRueda()
             campo.setDecimals(2)
             campo.setRange(0, 10 ** 9)
         campo.setValue(valor)
@@ -300,17 +350,96 @@ class VentanaPrincipal(QMainWindow):
         for atributo, campo in self.campos.items():
             campo.setValue(getattr(defecto, atributo))
 
+    # ---- Columnas congeladas ---------------------------------------------------
+
+    def menu_congelar(self, encabezado, posicion):
+        columna = encabezado.logicalIndexAt(posicion)
+        if columna < 0:
+            return
+        titulo = TITULOS[columna].replace("\n", " - ")
+        # Sin inicio elegido, el rango arranca desde la primera columna
+        inicio = self.inicio_congelado if self.inicio_congelado is not None else 0
+        rango = (min(inicio, columna), max(inicio, columna))  # el orden en que se marcan no importa
+
+        menu = QMenu(self)
+        desde = menu.addAction(f"Congelar desde acá («{titulo}»)")
+        desde.setEnabled(self.inicio_congelado != columna)
+        hasta = menu.addAction(f"Congelar hasta acá («{titulo}»)")
+        hasta.setEnabled(rango != (0, len(CLAVES) - 1))  # siempre tiene que quedar alguna columna para mover
+        cancelar = None
+        if self.inicio_congelado is not None:
+            cancelar = menu.addAction("Cancelar selección")
+        descongelar = menu.addAction("Descongelar columnas")
+        descongelar.setEnabled(self.rango_congelado is not None)
+
+        elegida = menu.exec(encabezado.mapToGlobal(posicion))
+        if elegida is None:
+            return
+        if elegida == desde:
+            self.elegir_inicio(columna)
+        elif elegida == hasta:
+            self.elegir_inicio(None)
+            self.congelar_rango(rango)
+        elif elegida == cancelar:
+            self.elegir_inicio(None)
+        elif elegida == descongelar:
+            self.congelar_rango(None)
+
+    def elegir_inicio(self, columna):
+        self.inicio_congelado = columna
+        self.modelo.marcar_columna(columna)
+
+    def congelar_rango(self, rango):
+        """Congela las columnas de `rango` (primera, ultima), ambas inclusive. None = descongelar."""
+        anchos = [self.tabla_de_columna(c).columnWidth(c) for c in range(len(CLAVES))]
+        self.rango_congelado = rango
+        self.aplicar_congelado()
+        for c, ancho in enumerate(anchos):
+            self.tabla_de_columna(c).setColumnWidth(c, ancho)
+        self.ajustar_tabla_fija()
+
+    def esta_congelada(self, columna):
+        return self.rango_congelado is not None and self.rango_congelado[0] <= columna <= self.rango_congelado[1]
+
+    def tabla_de_columna(self, columna):
+        return self.tabla_fija if self.esta_congelada(columna) else self.tabla
+
+    def aplicar_congelado(self):
+        """Cada columna se muestra en una sola de las dos tablas."""
+        for c in range(len(CLAVES)):
+            self.tabla_fija.setColumnHidden(c, not self.esta_congelada(c))
+            self.tabla.setColumnHidden(c, self.esta_congelada(c))
+        hay_congeladas = self.rango_congelado is not None
+        self.tabla_fija.setVisible(hay_congeladas)
+        self.tabla.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOn if hay_congeladas else Qt.ScrollBarAsNeeded)
+
+    def ajustar_tabla_fija(self):
+        """La tabla fija mide lo que sus columnas, hasta un 70% del espacio disponible."""
+        if self.rango_congelado is None:
+            return
+        ancho = self.tabla_fija.horizontalHeader().length() + 2 * self.tabla_fija.frameWidth()
+        self.tabla_fija.setMaximumWidth(ancho)
+        total = self.tablas.width()
+        fija = min(ancho, total * 7 // 10)
+        self.tablas.setSizes([fija, total - fija])
+
+    def scroll_desde_tabla_fija(self, valor):
+        if self.tabla_fija.isVisible():
+            self.tabla.verticalScrollBar().setValue(valor)
+
     # ---- Acciones -------------------------------------------------------------
 
-    def simular(self):
-        p = self.leer_parametros()
+    def simular(self): # Lo ejecuta el boton "Simular" y muestra los resultados en la pestaña correspondiente
+        p = self.leer_parametros() 
         errores = p.validar()
         if errores:
             QMessageBox.warning(self, "Parámetros inválidos", "\n".join(errores))
             return
 
-        sim = Simulacion(p)
-        sim.ejecutar()
+        sim = Simulacion(p) # Crea el modelo de la simulacion con los parametros p
+        sim.ejecutar() # Hace la salsa
+
+    #----------------------------------------------------------------------------
 
         # Filas desde la hora j + la ultima fila (instante X)
         self.filas = list(sim.filas_mostradas)
@@ -318,7 +447,10 @@ class VentanaPrincipal(QMainWindow):
         if not self.filas or self.filas[-1]["fila"] != ultima["fila"]:
             self.filas.append(ultima)
         self.modelo.cargar(self.filas)
+        self.aplicar_congelado()   # recargar el modelo vuelve a mostrar todas las columnas
+        self.tabla_fija.resizeColumnsToContents()
         self.tabla.resizeColumnsToContents()
+        self.ajustar_tabla_fija()
         self.tabla.selectRow(0)
 
         self.mostrar_resultados(sim.resultados(), p)

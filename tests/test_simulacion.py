@@ -75,6 +75,27 @@ class TestSimulacion(unittest.TestCase):
     def test_arranques_repetidos_invalidos(self):
         self.assertTrue(Parametros(inicio_t=1, inicio_i=1).validar())
 
+    def test_valores_por_defecto_validos(self):
+        self.assertEqual(Parametros().validar(), [])
+
+    def test_demoras_y_traslados_en_cero_invalidos(self):
+        atributos = ("t_min", "t_tras_12", "t_tras_23", "t_tras_31",
+                     "i_demora", "i_tras_12", "i_tras_23", "i_tras_31",
+                     "s_demora", "s_traslado", "s_regreso")
+        for atributo in atributos:
+            with self.subTest(atributo=atributo):
+                self.assertEqual(len(Parametros(**{atributo: 0}).validar()), 1)
+
+    def test_informa_todos_los_ceros_juntos(self):
+        self.assertEqual(len(Parametros(i_demora=0, s_traslado=0, t_tras_12=0).validar()), 3)
+
+    def test_tiempo_extra_en_cero_depende_de_su_probabilidad(self):
+        self.assertEqual(len(Parametros(t_extra=0, t_prob_extra=0.3).validar()), 1)
+        self.assertEqual(Parametros(t_extra=0, t_prob_extra=0).validar(), [])
+
+    def test_ceros_permitidos(self):
+        self.assertEqual(Parametros(desde_hora_j=0, s_prob_1=0, s_prob_2=0.5, s_prob_3=0.5).validar(), [])
+
 
 if __name__ == "__main__":
     unittest.main()

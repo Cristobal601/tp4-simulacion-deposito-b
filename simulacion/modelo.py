@@ -59,6 +59,25 @@ class Parametros:
             errores.append("La semilla debe estar entre 0 y m - 1.")
         if self.t_min >= self.t_max:
             errores.append("En U[a;b) del Técnico T, a debe ser menor que b.")
+        # Demoras y traslados: un tiempo en cero no tiene sentido
+        tiempos = (
+            (self.t_min, "Técnico T - Demora U[a;b): a"),
+            (self.t_tras_12, "Técnico T - Traslado Dep 1 → 2"),
+            (self.t_tras_23, "Técnico T - Traslado Dep 2 → 3"),
+            (self.t_tras_31, "Técnico T - Traslado Dep 3 → 1"),
+            (self.i_demora, "Técnico I - Demora (min)"),
+            (self.i_tras_12, "Técnico I - Traslado Dep 1 → 2"),
+            (self.i_tras_23, "Técnico I - Traslado Dep 2 → 3"),
+            (self.i_tras_31, "Técnico I - Traslado Dep 3 → 1"),
+            (self.s_demora, "Supervisor - Demora revisión (min)"),
+            (self.s_traslado, "Supervisor - Traslado entre depósitos"),
+            (self.s_regreso, "Supervisor - Regresa después de (min)"),
+        )
+        for valor, nombre in tiempos:
+            if valor <= 0:
+                errores.append(f"{nombre} debe ser mayor que 0.")
+        if self.t_prob_extra > 0 and self.t_extra <= 0:  # con probabilidad 0 el extra nunca se usa
+            errores.append("Técnico T - Tiempo extra (min) debe ser mayor que 0 si su probabilidad es mayor que 0.")
         if not 0 <= self.t_prob_extra <= 1:
             errores.append("La probabilidad del tiempo extra debe estar entre 0 y 1.")
         if round(self.s_prob_1 + self.s_prob_2 + self.s_prob_3, 6) != 1:
@@ -107,7 +126,7 @@ class Supervisor:
 
 class Deposito:
     def __init__(self, numero):
-        self.numero = numero
+        self.numero = numero        #   1, 2 o 3    
         self.ocupante = None        # None, "T", "I" o "S"
         self.cola = []              # tecnicos esperando para entrar
         self.interrumpido = None    # tecnico interrumpido por el supervisor
@@ -173,7 +192,7 @@ class Simulacion:
     def ejecutar(self):
         self.inicializar()
         nombre = "Inicialización"
-        self.guardar_fila(nombre)
+        self.guardar_fila(nombre) # vector estado inicial (fila 0)
 
         while self.fila < self.p.max_iteraciones:
             hora, _, tipo, quien = self.proximo_evento()
@@ -188,7 +207,7 @@ class Simulacion:
             self.fila += 1
             self.reloj = hora
             self.aux = {}
-            nombre = self.nombre_evento(tipo, quien)
+            nombre = self.nombre_evento(tipo, quien) # nombre del evento para mostrar en la fila (actual)
 
             if tipo == "fin_tarea":
                 self.fin_tarea(self.tecnicos[quien])
@@ -201,10 +220,11 @@ class Simulacion:
             elif tipo == "regreso_supervisor":
                 self.regreso_supervisor()
 
-            self.guardar_fila(nombre)
+            self.guardar_fila(nombre) #vector estado de la fila actual (si esta dentro de la ventana)
 
         # Se llego al maximo de iteraciones antes del tiempo X
-        self.ultima_fila = self.foto(nombre)
+        self.ultima_fila = self.foto(nombre) # Aca se guarda la ultima fila, que puede ser la del ultimo evento 
+                                            #  o la del instante X (si se llego a X antes de max_iteraciones)
 
     def proximo_evento(self):
         """Busca el evento de menor hora.
@@ -219,12 +239,12 @@ class Simulacion:
             (T.fin_tarea, 1, "fin_tarea", "T"),
             (I.fin_tarea, 2, "fin_tarea", "I"),
             (sup.llegada, 3, "llegada_supervisor", "S"),
-            (sup.regreso, 4, "regreso_supervisor", "S"),
+            (sup.regreso, 4, "regreso_supervisor", "S"), #seria como la llegada del supervisor al predio, pero no es un evento que afecte a los depositos
             (T.llegada, 5, "llegada_tecnico", "T"),
             (I.llegada, 6, "llegada_tecnico", "I"),
         ]
-        programados = [ev for ev in candidatos if ev[0] is not None]
-        return min(programados)
+        programados = [ev for ev in candidatos if ev[0] is not None] #En el caso de que no haya eventos programados, devuelve None
+        return min(programados) # Devuelve el evento con la menor hora (y en caso de empate, el de mayor prioridad)
 
     def nombre_evento(self, tipo, quien):
         if tipo == "fin_tarea":
@@ -354,9 +374,9 @@ class Simulacion:
 
         tec.fin_tarea = round(self.reloj + tiempo, 2)
 
-    def atender_siguiente(self, deposito):
+    def atender_siguiente(self, deposito): # logica para manejar la cola de tecnicos y el interrumpido por el supervisor
         """Cuando se libera un deposito: primero el interrumpido, despues la cola."""
-        if deposito.interrumpido is not None:
+        if deposito.interrumpido is not None: # Interrumpido por el supervisor: puede ser None (nadie) , T , I
             tec = self.tecnicos[deposito.interrumpido]
             deposito.interrumpido = None
             self.iniciar_tarea(tec, deposito.numero)   # reinicia con demora NUEVA
