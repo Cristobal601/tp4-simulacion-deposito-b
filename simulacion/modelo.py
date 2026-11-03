@@ -53,6 +53,8 @@ class Parametros:
             errores.append("El tiempo X debe ser mayor que 0.")
         if not 1 <= self.max_iteraciones <= 100000:
             errores.append("Las iteraciones deben estar entre 1 y 100.000.")
+        if self.desde_hora_j >= self.tiempo_x:  # si no, el vector solo mostraria la ultima fila
+            errores.append("La hora j debe ser menor que el tiempo X.")
         if self.filas_i < 1:
             errores.append("La cantidad de filas i debe ser al menos 1.")
         if not 0 <= self.semilla < self.m:
@@ -195,7 +197,7 @@ class Simulacion:
         self.guardar_fila(nombre) # vector estado inicial (fila 0)
 
         while self.fila < self.p.max_iteraciones:
-            hora, _, tipo, quien = self.proximo_evento()
+            hora, _, tipo, quien = self.proximo_evento() # Proximo evento: hora, prioridad, tipo, quien
             if hora > self.p.tiempo_x:
                 # El proximo evento cae despues de X: cerramos en el instante X
                 self.fila += 1
@@ -206,7 +208,7 @@ class Simulacion:
 
             self.fila += 1
             self.reloj = hora
-            self.aux = {}
+            self.aux = {} # valores calculados SOLO en la fila actual (rnd, tiempos)
             nombre = self.nombre_evento(tipo, quien) # nombre del evento para mostrar en la fila (actual)
 
             if tipo == "fin_tarea":
@@ -243,7 +245,7 @@ class Simulacion:
             (T.llegada, 5, "llegada_tecnico", "T"),
             (I.llegada, 6, "llegada_tecnico", "I"),
         ]
-        programados = [ev for ev in candidatos if ev[0] is not None] #En el caso de que no haya eventos programados, devuelve None
+        programados = [ev for ev in candidatos if ev[0] is not None] # Aca se filtran los eventos que no estan programados (None)
         return min(programados) # Devuelve el evento con la menor hora (y en caso de empate, el de mayor prioridad)
 
     def nombre_evento(self, tipo, quien):
@@ -378,7 +380,7 @@ class Simulacion:
         """Cuando se libera un deposito: primero el interrumpido, despues la cola."""
         if deposito.interrumpido is not None: # Interrumpido por el supervisor: puede ser None (nadie) , T , I
             tec = self.tecnicos[deposito.interrumpido]
-            deposito.interrumpido = None
+            deposito.interrumpido = None 
             self.iniciar_tarea(tec, deposito.numero)   # reinicia con demora NUEVA
         elif deposito.cola:
             tec = self.tecnicos[deposito.cola.pop(0)]

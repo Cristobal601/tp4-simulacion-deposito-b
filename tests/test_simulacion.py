@@ -93,6 +93,11 @@ class TestSimulacion(unittest.TestCase):
         self.assertEqual(len(Parametros(t_extra=0, t_prob_extra=0.3).validar()), 1)
         self.assertEqual(Parametros(t_extra=0, t_prob_extra=0).validar(), [])
 
+    def test_hora_j_debe_ser_menor_que_x(self):
+        self.assertEqual(len(Parametros(tiempo_x=1440, desde_hora_j=2000).validar()), 1)
+        self.assertEqual(len(Parametros(tiempo_x=1440, desde_hora_j=1440).validar()), 1)
+        self.assertEqual(Parametros(tiempo_x=1440, desde_hora_j=1439).validar(), [])
+
     def test_ceros_permitidos(self):
         self.assertEqual(Parametros(desde_hora_j=0, s_prob_1=0, s_prob_2=0.5, s_prob_3=0.5).validar(), [])
 
